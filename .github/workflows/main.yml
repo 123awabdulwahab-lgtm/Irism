@@ -1,0 +1,59 @@
+name: Build APK from ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip kholo aur project dhundo
+        run: |
+          ZIP=$(ls *.zip | head -n 1)
+          echo "Zip mili: $ZIP"
+          mkdir -p /tmp/proj
+          unzip -q "$ZIP" -d /tmp/proj
+          PKG=$(find /tmp/proj -name package.json -not -path "*/node_modules/*" | awk '{print length, $0}' | sort -n | head -n 1 | cut -d' ' -f2-)
+          DIR=$(dirname "$PKG")
+          echo "Project folder: $DIR"
+          echo "PROJ=$DIR" >> $GITHUB_ENV
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: JS dependencies install
+        working-directory: ${{ env.PROJ }}
+        run: npm ci || npm install
+
+      - name: Debug keystore banao
+        working-directory: ${{ env.PROJ }}/android/app
+        run: |
+          [ -f debug.keystore ] || keytool -genkeypair -v -storetype PKCS12 \
+            -keystore debug.keystore -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: APK build karo
+        working-directory: ${{ env.PROJ }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: APK upload karo
+        uses: actions/upload-artifact@v4
+        with:
+          name: IRIS-X-apk
+          path: ${{ env.PROJ }}/android/app/build/outputs/apk/release/*.apk
